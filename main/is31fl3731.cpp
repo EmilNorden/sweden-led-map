@@ -19,7 +19,8 @@
 #define ISSI_REG_CONFIG_AUTOPLAYMODE 0x08
 #define ISSI_REG_CONFIG_AUDIOPLAYMODE 0x18
 
-IS31FL3731_Driver::IS31FL3731_Driver(i2c_master_bus_handle_t bus, int i2c_address) {
+IS31FL3731_Driver::IS31FL3731_Driver(i2c_master_bus_handle_t bus, const int i2c_address, const std::unordered_map<int, int>& led_index_overrides)
+    : m_led_index_overrides(led_index_overrides){
     i2c_device_config_t dev_config;
     dev_config.dev_addr_length = I2C_ADDR_BIT_LEN_7;
     dev_config.device_address = i2c_address;
@@ -52,21 +53,25 @@ IS31FL3731_Driver::IS31FL3731_Driver(i2c_master_bus_handle_t bus, int i2c_addres
     for (uint8_t f = 0; f < 8; f++) {
         for (uint8_t i = 0; i <= 0x11; i++)
             i2c_write_register8(f, i, 0xff);
-        //writeRegister8(f, i, 0xff); // each 8 LEDs on
     }
 
     audio_sync(false);
 }
 
-void IS31FL3731_Driver::set_pwm(int x, int y, int pwm, uint8_t frame) {
+void IS31FL3731_Driver::set_pwm(const int x, const int y, const int pwm, const uint8_t frame) {
     if ((x < 0) || (x >= 16))
         return;
     if ((y < 0) || (y >= 9))
         return;
-    if (pwm > 255)
-        pwm = 255; // PWM 8bit max
 
-    set_led_pwm(x + y * 16, pwm, frame);
+    set_pwm_by_index(x + y * 16, pwm, frame);
+}
+
+void IS31FL3731_Driver::set_pwm_by_index(const int index, int pwm, const uint8_t frame) {
+    if (pwm > 255)
+        pwm = 255; // PWM 8bit
+
+    set_led_pwm(index, pwm, frame);
 }
 
 void IS31FL3731_Driver::display_frame(uint8_t frame) {
@@ -77,19 +82,19 @@ void IS31FL3731_Driver::display_frame(uint8_t frame) {
     i2c_write_register8(ISSI_BANK_FUNCTIONREG, ISSI_REG_PICTUREFRAME, frame);
 }
 
-void IS31FL3731_Driver::i2c_select_bank(uint8_t bank) {
+void IS31FL3731_Driver::i2c_select_bank(const uint8_t bank) const {
     const uint8_t cmd[2] = {ISSI_COMMANDREGISTER, bank};
     ESP_ERROR_CHECK(i2c_master_transmit(m_i2c_handle, cmd, sizeof(cmd), 100));
 }
 
-void IS31FL3731_Driver::i2c_write_register8(uint8_t bank, uint8_t reg, const uint8_t data) {
+void IS31FL3731_Driver::i2c_write_register8(const uint8_t bank, const uint8_t reg, const uint8_t data) const {
     i2c_select_bank(bank);
 
     const uint8_t cmd[2] = {reg, data};
     ESP_ERROR_CHECK(i2c_master_transmit(m_i2c_handle, cmd, sizeof(cmd), 100));
 }
 
-void IS31FL3731_Driver::clear(uint8_t frame) {
+void IS31FL3731_Driver::clear(uint8_t frame) const {
     i2c_select_bank(frame);
     uint8_t erasebuf[25] = {0};
 
@@ -99,7 +104,7 @@ void IS31FL3731_Driver::clear(uint8_t frame) {
     }
 }
 
-void IS31FL3731_Driver::audio_sync(bool sync) {
+void IS31FL3731_Driver::audio_sync(bool sync) const {
     if (sync) {
         i2c_write_register8(ISSI_BANK_FUNCTIONREG, ISSI_REG_AUDIOSYNC, 0x1);
     }
@@ -108,10 +113,31 @@ void IS31FL3731_Driver::audio_sync(bool sync) {
     }
 }
 
-void IS31FL3731_Driver::set_led_pwm(uint8_t lednum, uint8_t pwm, uint8_t bank) {
-    if (lednum >= 144) {
+void IS31FL3731_Driver::set_led_pwm(uint8_t lednum, const uint8_t pwm, const uint8_t bank) {
+    constexpr auto LedCount = 144;
+    constexpr auto Matrix_Size = 72;
+    constexpr auto MatrixA_StartOffset = 0x24;
+    constexpr auto MatrixB_StartOffset = 0x2C;
+    constexpr auto Matrix_RowSize = 0x10;
+
+    if (const auto it = m_led_index_overrides.find(lednum); it != m_led_index_overrides.end()) {
+        lednum = it->second;
+    }
+
+    if (lednum >= LedCount) {
         return;
     }
 
-    i2c_write_register8(bank, 0x24 + lednum, pwm);
+
+    auto led_index_offset = MatrixA_StartOffset;
+    if (lednum >= Matrix_Size) {
+        led_index_offset = MatrixB_StartOffset;
+        lednum -= Matrix_Size;
+    }
+    auto [matrix_row, matrix_col] = std::div(lednum, 8);
+
+    const int index = led_index_offset + (matrix_row * Matrix_RowSize) + matrix_col;
+
+    i2c_write_register8(bank, index, pwm);
 }
+
