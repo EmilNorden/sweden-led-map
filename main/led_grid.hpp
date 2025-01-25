@@ -11,6 +11,8 @@
 #include "driver/i2c_master.h"
 #include "led_driver.hpp"
 #include "led_physical_config.h"
+#include <vector>
+#include "esp_log.h"
 
 template <typename T>
 concept DerivedFromBase = std::is_base_of_v<LedDriverBase, T>;
@@ -34,14 +36,31 @@ public:
   }
 
 
-  void set_led(const int x, const int y, uint8_t pwm, uint8_t frame) {
+  void set_led(const int x, const int y, uint8_t pwm) {
     const int index = (y*LedGridWidth) + x;
     const auto it = m_leds.find(index);
     if (it == m_leds.end()) {
       return;
     }
 
-    m_drivers[it->second.driver_index].set_pwm_by_index(it->second.led_index, pwm, frame);
+    m_drivers[it->second.driver_index].set_pwm_by_index(it->second.led_index, pwm, m_next_frame);
+  }
+
+  void present() {
+    for (auto& driver : m_drivers) {
+      driver.display_frame(m_next_frame);
+    }
+
+    m_next_frame = (m_next_frame + 1) % 8;
+  }
+
+  const std::vector<std::pair<int, int>>& positions() const {
+    return m_positions;
+  }
+
+  void next_frame() {
+    m_next_frame++;
+    ESP_LOGI("grid", "Hello from grid");
   }
 
 private:
@@ -52,6 +71,7 @@ private:
         if (driver_leds[y][x] == 1) {
           int global_y = Driver_YOffsets[driver_index] + y;
           m_leds.emplace((global_y * LedGridWidth) + x, LedIdentifier{driver_index, led_index++});
+          m_positions.push_back(std::make_pair(x, global_y));
         }
       }
     }
@@ -59,6 +79,8 @@ private:
 
   std::array<LedDriver, NumDrivers> m_drivers;
   std::unordered_map<int, LedIdentifier> m_leds;
+  std::vector<std::pair<int, int>> m_positions;
+  uint8_t m_next_frame{1};
 };
 
 #endif //LED_GRID_H

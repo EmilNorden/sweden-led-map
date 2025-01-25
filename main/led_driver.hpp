@@ -14,6 +14,7 @@ public:
 
   virtual void set_pwm(int x, int y, int pwm, uint8_t frame) = 0;
   virtual void set_pwm_by_index(int index, int pwm, uint8_t frame) = 0;
+  virtual void display_frame(uint8_t frame) = 0;
 };
 
 class IS31FL3731_Driver final : public LedDriverBase {
@@ -21,7 +22,7 @@ public:
   IS31FL3731_Driver(i2c_master_bus_handle_t bus, int i2c_address, const std::unordered_map<int, int>& led_index_overrides = {});
   void set_pwm(int x, int y, int pwm, uint8_t frame) override;
   void set_pwm_by_index(int index, int pwm, uint8_t frame) override;
-  void display_frame(uint8_t frame);
+  void display_frame(uint8_t frame) override;
 private:
 
   void i2c_select_bank(uint8_t bank) const;
